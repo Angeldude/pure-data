@@ -66,6 +66,7 @@ static t_symbol *canvas_newfilename = &s_;
 static t_symbol *canvas_newdirectory = &s_;
 static int canvas_newargc;
 static t_atom *canvas_newargv;
+t_glist *glist_reloadingabstraction;
 
     /* maintain the list of visible toplevels for the GUI's "windows" menu */
 void canvas_updatewindowlist( void)
@@ -650,9 +651,9 @@ void canvas_map(t_canvas *x, t_floatarg f)
             }
             for (y = x->gl_list; y; y = y->g_next)
                 gobj_vis(y, x, 1);
+            x->gl_mapped = 1;
             for (sel = x->gl_editor->e_selection; sel; sel = sel->sel_next)
                 gobj_select(sel->sel_what, x, 1);
-            x->gl_mapped = 1;
             canvas_drawlines(x);
             if (x->gl_isgraph && x->gl_goprect)
                 canvas_drawredrect(x, 1);
@@ -936,14 +937,11 @@ void canvas_initbang(t_canvas *x)
 {
     t_gobj *y;
     t_symbol *s = gensym("loadbang");
-    if (!x || x->gl_pd != canvas_class)
     /* run "initbang" for all subpatches, but NOT for the child abstractions */
     for (y = x->gl_list; y; y = y->g_next)
-        if (pd_class(&y->g_pd) == canvas_class)
-    {
-        if (!canvas_isabstraction((t_canvas *)y))
-            canvas_initbang((t_canvas *)y);
-    }
+        if (pd_class(&y->g_pd) == canvas_class &&
+            !canvas_isabstraction((t_canvas *)y))
+                canvas_initbang((t_canvas *)y);
     /* call the initbang()-method for objects that have one */
     for (y = x->gl_list; y; y = y->g_next)
         if ((pd_class(&y->g_pd) != canvas_class) && zgetfn(&y->g_pd, s))
@@ -1155,6 +1153,8 @@ static void canvas_start_dsp(void)
         canvas_dodsp(x, 1, 0);
 
     canvas_dspstate = pd_this->pd_dspstate = 1;
+    if (gensym("pd-dsp-started")->s_thing)
+        pd_bang(gensym("pd-dsp-started")->s_thing);
 }
 
 static void canvas_stop_dsp(void)
@@ -1164,6 +1164,8 @@ static void canvas_stop_dsp(void)
         ugen_stop();
         sys_gui("pdtk_pd_dsp OFF\n");
         canvas_dspstate = pd_this->pd_dspstate = 0;
+        if (gensym("pd-dsp-stopped")->s_thing)
+            pd_bang(gensym("pd-dsp-stopped")->s_thing);
     }
 }
 
@@ -1350,8 +1352,11 @@ void canvas_savedeclarationsto(t_canvas *x, t_binbuf *b)
             binbuf_addbinbuf(b, ((t_declare *)y)->x_obj.te_binbuf);
             binbuf_addv(b, ";");
         }
+            /* before 0.47 we also allowed abstractions to write out to the
+            parent's declarations; now we only allow non-abstraction subpatches
+            to do so. */
         else if (pd_checkglist(&y->g_pd) &&
-            !canvas_isabstraction((t_canvas *)y))
+            (pd_compatibilitylevel < 47 || !canvas_isabstraction((t_canvas *)y)))
                 canvas_savedeclarationsto((t_canvas *)y, b);
     }
 }
